@@ -1,0 +1,6 @@
+{
+  "name": "CARDOS - AI Commands Card Deck",
+  "description": "Premium deck of 50 AI commands for business builders. Pick a card, fill placeholders, copy or execute live with Gemini integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
