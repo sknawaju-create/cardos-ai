@@ -5,9 +5,13 @@ import { Clipboard, Check, Undo2, LayoutTemplate, Lock } from "lucide-react";
 interface CardDetailProps {
   card: CardCommand;
   onBack?: () => void;
+  deepLinked?: boolean;
 }
 
-export default function CardDetail({ card, onBack }: CardDetailProps) {
+export default function CardDetail({ card, onBack, deepLinked = false }: CardDetailProps) {
+  // A card is unlocked if it's the free sample (SALE-01) OR it was opened
+  // directly via its own URL (deep-linked from a physical card's QR code).
+  const isUnlocked = card.id === "SALE-01" || deepLinked;
   // Store values inputted for each placeholder
   const [values, setValues] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState(false);
@@ -79,7 +83,7 @@ export default function CardDetail({ card, onBack }: CardDetailProps) {
         {/* LEFT COLUMN: Input Variables Configuration */}
         <div className="lg:col-span-2 space-y-5">
           <div className="bg-[#111110] rounded-2xl border border-white/10 p-6 shadow-2xl flex flex-col h-full text-white relative overflow-hidden">
-            {card.id !== "SALE-01" && (
+            {!isUnlocked && (
               <>
                 <div className="absolute top-3 right-3 bg-brand-orange/10 border border-brand-orange/20 rounded-lg px-2 py-1 flex items-center gap-1 z-20">
                   <Lock className="w-3 h-3 text-brand-orange" />
@@ -113,18 +117,18 @@ export default function CardDetail({ card, onBack }: CardDetailProps) {
             {/* Parameter configuration input controls */}
             <div className="space-y-4 pt-2">
               <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 font-semibold block mb-1">
-                Configure Card Parameters {card.id !== "SALE-01" && " (Locked)"}
+                Configure Card Parameters {!isUnlocked && " (Locked)"}
               </span>
 
               {card.placeholders.map((param) => (
-                <div key={param.key} className={`space-y-1 ${card.id !== "SALE-01" ? "opacity-60" : ""}`}>
+                <div key={param.key} className={`space-y-1 ${!isUnlocked ? "opacity-60" : ""}`}>
                   <div className="flex justify-between items-baseline">
                      <label className="text-xs font-semibold text-zinc-200">{param.label}</label>
                     <span className="text-[9px] font-mono text-brand-orange font-bold">[{param.key}]</span>
                   </div>
                   <input
                     type="text"
-                    disabled={card.id !== "SALE-01"}
+                    disabled={!isUnlocked}
                     value={values[param.key] || ""}
                     onChange={(e) => handleInputChange(param.key, e.target.value)}
                     placeholder={param.defaultValue}
@@ -135,11 +139,11 @@ export default function CardDetail({ card, onBack }: CardDetailProps) {
               ))}
 
               {/* Extra sandbox adjustments */}
-              <div className={`space-y-1 pt-2 ${card.id !== "SALE-01" ? "opacity-60" : ""}`}>
+              <div className={`space-y-1 pt-2 ${!isUnlocked ? "opacity-60" : ""}`}>
                 <label className="text-xs font-semibold text-zinc-200 font-sans">Extra Niche Directives (Optional)</label>
                 <textarea
                   rows={2}
-                  disabled={card.id !== "SALE-01"}
+                  disabled={!isUnlocked}
                   value={customInstructions}
                   onChange={(e) => setCustomInstructions(e.target.value)}
                   placeholder="e.g. Keep sentences extremely brief under 100 words, translate to German..."
@@ -150,7 +154,7 @@ export default function CardDetail({ card, onBack }: CardDetailProps) {
 
             {/* Quick Action Buttons */}
             <div className="mt-8 pt-4 border-t border-white/10 space-y-2 mt-auto">
-              {card.id === "SALE-01" ? (
+              {isUnlocked ? (
                 <button
                   onClick={handleCopyPrompt}
                   className="w-full bg-brand-orange hover:bg-brand-orange/90 text-[#111110] border-none rounded-xl py-3.5 text-xs font-bold tracking-wider uppercase transition-all flex items-center justify-center gap-2 cursor-pointer animate-pulse hover:animate-none"
@@ -186,7 +190,7 @@ export default function CardDetail({ card, onBack }: CardDetailProps) {
                 Active Blueprint
               </h4>
               <div className="bg-black/40 border border-white/5 rounded-xl p-5 flex-1 overflow-y-auto relative min-h-[320px]">
-                {card.id !== "SALE-01" && (
+                {!isUnlocked && (
                   <div className="absolute inset-0 bg-black/60 backdrop-blur-[3px] flex items-center justify-center p-4 text-center z-10">
                     <div className="bg-[#111110] border border-white/10 rounded-xl p-6 max-w-sm space-y-3 shadow-xl">
                       <Lock className="w-6 h-6 text-brand-orange mx-auto" />
@@ -203,7 +207,7 @@ export default function CardDetail({ card, onBack }: CardDetailProps) {
                     </div>
                   </div>
                 )}
-                <pre className={`text-xs font-mono leading-relaxed whitespace-pre-wrap text-zinc-300 font-light ${card.id !== "SALE-01" ? "select-none" : ""}`}>
+                <pre className={`text-xs font-mono leading-relaxed whitespace-pre-wrap text-zinc-300 font-light ${!isUnlocked ? "select-none" : ""}`}>
                   {composedPrompt}
                   {customInstructions && `\n\n[Adjustment Directives]\n${customInstructions}`}
                 </pre>
