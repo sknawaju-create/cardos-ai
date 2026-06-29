@@ -93,7 +93,7 @@ export default function WaitlistForm({ onJoinSuccess, triggerRefreshStats }: Wai
 
   // Hard deadline June 30th 2026. Calculate days left
   const getDaysRemaining = () => {
-    const targetDate = new Date("2026-06-30T00:00:00");
+    const targetDate = new Date("2026-07-30T00:00:00");
     const now = new Date();
     const diffTime = targetDate.getTime() - now.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
