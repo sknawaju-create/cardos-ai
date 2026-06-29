@@ -51,7 +51,7 @@ export default function WaitlistForm({ onJoinSuccess, triggerRefreshStats }: Wai
     checkGoogleFormStatus();
   }, [triggerRefreshStats]);
 
-  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzWrHvVab_VaaxsUmnBBcFEJDwuRSZEnRS-PgyG170UdkCTy1a2PgMOtbGSaIHBoxbi/exec";
+  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwt1_UC1v_S3PbOc3uNwWEJnlZmfH0LJfzfrxDIIpHXxElN3JijvpJdTe4xhfmLGtHw/exec";
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
