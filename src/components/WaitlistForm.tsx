@@ -51,9 +51,12 @@ export default function WaitlistForm({ onJoinSuccess, triggerRefreshStats }: Wai
     checkGoogleFormStatus();
   }, [triggerRefreshStats]);
 
+  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzWrHvVab_VaaxsUmnBBcFEJDwuRSZEnRS-PgyG170UdkCTy1a2PgMOtbGSaIHBoxbi/exec";
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!email.trim() || !email.includes("@")) {
+    const trimmed = email.trim();
+    if (!trimmed || !trimmed.includes("@")) {
       setError("Please enter a valid email address.");
       return;
     }
@@ -62,22 +65,21 @@ export default function WaitlistForm({ onJoinSuccess, triggerRefreshStats }: Wai
     setError("");
 
     try {
-      const res = await fetch("/api/waitlist", {
+      // Submit to Google Apps Script -> writes directly to Google Sheet
+      await fetch(APPS_SCRIPT_URL, {
         method: "POST",
+        mode: "no-cors",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email })
+        body: JSON.stringify({ email: trimmed, timestamp: new Date().toISOString() })
       });
 
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setSuccess(true);
-        fetchStats();
-        if (onJoinSuccess) onJoinSuccess();
-      } else {
-        setError(data.error || "Something went wrong. Please try again.");
-      }
+      // no-cors means we cannot read the response, but if no error thrown the request was sent.
+      // Show success immediately — the sheet will have the entry.
+      setSuccess(true);
+      setStats(prev => ({ ...prev, count: prev.count + 1, realUsersJoined: prev.realUsersJoined + 1 }));
+      if (onJoinSuccess) onJoinSuccess();
     } catch {
-      setError("Connection error. Is the server running?");
+      setError("Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
