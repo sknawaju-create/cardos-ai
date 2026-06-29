@@ -304,7 +304,6 @@ export default function App() {
             </div>
             <div>
               <span className="font-sans font-bold text-sm tracking-[0.25em] uppercase block">CARDOS</span>
-              <span className="text-[9px] font-mono tracking-widest text-[#888780] block -mt-1">THE TACTILE OPERATING SYSTEM</span>
             </div>
           </div>
 
