@@ -126,10 +126,23 @@ function getCardFromPath(deck: CardCommand[]): CardCommand {
   return match || deck[0];
 }
 
+// True if the current URL path points directly at a real card
+// (i.e. the visitor deep-linked in by scanning a QR code).
+function isDeepLink(deck: CardCommand[]): boolean {
+  const path = window.location.pathname.replace(/^\/+/, "").toLowerCase();
+  if (!path) return false;
+  return deck.some((c) => c.id.toLowerCase() === path);
+}
+
 export default function App() {
   const [deck, setDeck] = useState<CardCommand[]>(CARDOS_DECK);
   const [activeCard, setActiveCard] = useState<CardCommand>(
     () => getCardFromPath(CARDOS_DECK)
+  );
+  // True when the visitor arrived directly on a card URL (QR deep-link).
+  // Such cards are fully unlocked so buyers can copy their prompt.
+  const [deepLinked, setDeepLinked] = useState<boolean>(
+    () => isDeepLink(CARDOS_DECK)
   );
   const [refreshStatsCount, setRefreshStatsCount] = useState(0);
   const [showAdmin, setShowAdmin] = useState(false);
@@ -151,13 +164,31 @@ export default function App() {
   const howItWorksRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const onPopState = () => setActiveCard(getCardFromPath(deck));
+    const onPopState = () => {
+      setActiveCard(getCardFromPath(deck));
+      setDeepLinked(isDeepLink(deck));
+    };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, [deck]);
 
+  // On first load, if the visitor deep-linked to a card (QR scan), scroll
+  // straight to the prompt console so they see the prompt immediately.
+  useEffect(() => {
+    if (deepLinked && commandStationRef.current) {
+      // small delay lets the page render before scrolling
+      const t = setTimeout(() => {
+        commandStationRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 400);
+      return () => clearTimeout(t);
+    }
+    // run once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleSelectCard = (card: CardCommand) => {
     setActiveCard(card);
+    setDeepLinked(true);
     const newPath = `/${card.id.toLowerCase()}`;
     if (window.location.pathname !== newPath) {
       window.history.pushState({}, "", newPath);
@@ -304,6 +335,7 @@ export default function App() {
             </div>
             <div>
               <span className="font-sans font-bold text-sm tracking-[0.25em] uppercase block">CARDOS</span>
+              <span className="text-[9px] font-mono tracking-widest text-[#888780] block -mt-1">THE TACTILE OPERATING SYSTEM</span>
             </div>
           </div>
 
@@ -1280,7 +1312,7 @@ export default function App() {
 
         {/* ACTIVE EXECUTOR PANEL */}
         <div className="bg-[#FDFCFB] rounded-3xl border border-[#E8E6DF] p-2 hover:border-[#1A1A18] shadow-xs duration-300">
-          <CardDetail card={activeCard} onBack={() => {}} />
+          <CardDetail card={activeCard} onBack={() => {}} deepLinked={deepLinked} />
         </div>
 
         {/* DYNAMIC CARDS Grid CATALOG */}
