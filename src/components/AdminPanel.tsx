@@ -27,7 +27,19 @@ interface AdminPanelProps {
   triggerRefreshStats?: number;
 }
 
+const ADMIN_PASSWORD_STORAGE_KEY = "cardos_admin_pw";
+
 export default function AdminPanel({ onClose, triggerRefreshStats }: AdminPanelProps) {
+  // Admin authentication gate
+  const [adminPassword, setAdminPassword] = useState<string>(
+    () => sessionStorage.getItem(ADMIN_PASSWORD_STORAGE_KEY) || ""
+  );
+  const [authorized, setAuthorized] = useState(false);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [loginInput, setLoginInput] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [loginSubmitting, setLoginSubmitting] = useState(false);
+
   // Tabs
   const [activeTab, setActiveTab] = useState<"local" | "google">("local");
 
@@ -62,11 +74,55 @@ export default function AdminPanel({ onClose, triggerRefreshStats }: AdminPanelP
   const [googleStatusMsg, setGoogleStatusMsg] = useState("");
   const [googleError, setGoogleError] = useState("");
 
+  const authHeaders = (): Record<string, string> => ({ "x-admin-password": adminPassword });
+
+  // Validate an admin password against the server and update auth state.
+  const verifyAdmin = async (password: string): Promise<boolean> => {
+    try {
+      const res = await fetch("/api/admin/verify", { headers: { "x-admin-password": password } });
+      if (res.ok) {
+        setAdminPassword(password);
+        sessionStorage.setItem(ADMIN_PASSWORD_STORAGE_KEY, password);
+        setAuthorized(true);
+        return true;
+      }
+      sessionStorage.removeItem(ADMIN_PASSWORD_STORAGE_KEY);
+      setAuthorized(false);
+      return false;
+    } catch {
+      setAuthorized(false);
+      return false;
+    }
+  };
+
+  // Attempt to resume a session using a password saved earlier this tab.
+  useEffect(() => {
+    const stored = sessionStorage.getItem(ADMIN_PASSWORD_STORAGE_KEY);
+    if (!stored) {
+      setAuthChecking(false);
+      return;
+    }
+    verifyAdmin(stored).finally(() => setAuthChecking(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError("");
+    setLoginSubmitting(true);
+    const ok = await verifyAdmin(loginInput.trim());
+    setLoginSubmitting(false);
+    if (!ok) {
+      setLoginError("Incorrect admin password.");
+    }
+    setLoginInput("");
+  };
+
   // Load stats & list elements
   const fetchStatsAndRegisters = async () => {
     setLocalLoading(true);
     try {
-      const res = await fetch("/api/waitlist/stats");
+      const res = await fetch("/api/waitlist/stats", { headers: authHeaders() });
       const data = await res.json();
       setStats({
         count: data.count || 147,
@@ -101,7 +157,7 @@ export default function AdminPanel({ onClose, triggerRefreshStats }: AdminPanelP
     setGoogleLoading(true);
     setGoogleError("");
     try {
-      const res = await fetch("/api/google-forms/responses");
+      const res = await fetch("/api/google-forms/responses", { headers: authHeaders() });
       const data = await res.json();
       if (res.ok && data.success) {
         setResponses(data.responses || []);
@@ -116,9 +172,10 @@ export default function AdminPanel({ onClose, triggerRefreshStats }: AdminPanelP
   };
 
   useEffect(() => {
+    if (!authorized) return;
     fetchStatsAndRegisters();
     checkGoogleStatus();
-  }, [triggerRefreshStats]);
+  }, [triggerRefreshStats, authorized]);
 
   useEffect(() => {
     if (googleStatus.connected && googleStatus.formId) {
@@ -137,7 +194,7 @@ export default function AdminPanel({ onClose, triggerRefreshStats }: AdminPanelP
     try {
       const res = await fetch("/api/google-forms/configure-keys", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           clientId: customClientId,
           clientSecret: customClientSecret
@@ -162,7 +219,7 @@ export default function AdminPanel({ onClose, triggerRefreshStats }: AdminPanelP
   const handleConnectGoogle = async () => {
     setGoogleError("");
     try {
-      const res = await fetch("/api/auth/url");
+      const res = await fetch("/api/auth/url", { headers: authHeaders() });
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || "Failed to generate authorization session.");
@@ -201,7 +258,7 @@ export default function AdminPanel({ onClose, triggerRefreshStats }: AdminPanelP
       const targetState = !googleStatus.embedEnabled;
       const res = await fetch("/api/google-forms/toggle-embed", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ embedEnabled: targetState })
       });
       if (res.ok) {
@@ -219,7 +276,8 @@ export default function AdminPanel({ onClose, triggerRefreshStats }: AdminPanelP
     setGoogleStatusMsg("Triggering Forms API pipeline...");
     try {
       const res = await fetch("/api/google-forms/create-form", {
-        method: "POST"
+        method: "POST",
+        headers: authHeaders()
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -248,7 +306,7 @@ export default function AdminPanel({ onClose, triggerRefreshStats }: AdminPanelP
     try {
       const res = await fetch("/api/google-forms/link", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           formId: manualFormId,
           formUrl: manualFormUrl
@@ -273,7 +331,7 @@ export default function AdminPanel({ onClose, triggerRefreshStats }: AdminPanelP
       return;
     }
     try {
-      const res = await fetch("/api/google-forms/disconnect", { method: "POST" });
+      const res = await fetch("/api/google-forms/disconnect", { method: "POST", headers: authHeaders() });
       if (res.ok) {
         await checkGoogleStatus();
         setResponses([]);
@@ -306,6 +364,35 @@ export default function AdminPanel({ onClose, triggerRefreshStats }: AdminPanelP
         </p>
       </div>
 
+      {authChecking ? (
+        <div className="text-center py-10 text-xs font-mono text-[#888780] animate-pulse">
+          Checking admin session...
+        </div>
+      ) : !authorized ? (
+        <form onSubmit={handleLoginSubmit} className="max-w-xs mx-auto py-8 space-y-3 text-center">
+          <Lock className="w-6 h-6 text-brand-orange mx-auto" />
+          <p className="text-xs text-[#5F5E5A] leading-relaxed">
+            Enter the admin password to access the waitlist database and Google integration controls.
+          </p>
+          <input
+            type="password"
+            autoFocus
+            value={loginInput}
+            onChange={(e) => setLoginInput(e.target.value)}
+            placeholder="Admin password"
+            className="w-full bg-[#F5F4F0] border border-[#E8E6DF] rounded-lg px-3 py-2 text-xs font-mono text-center focus:outline-none focus:border-black placeholder:text-[#888780]"
+          />
+          {loginError && <p className="text-xs text-rose-600">{loginError}</p>}
+          <button
+            type="submit"
+            disabled={loginSubmitting || !loginInput.trim()}
+            className="w-full bg-[#1A1A18] hover:bg-neutral-800 disabled:opacity-50 text-white text-xs font-semibold py-2.5 rounded-lg transition-all cursor-pointer"
+          >
+            {loginSubmitting ? "Checking..." : "Unlock"}
+          </button>
+        </form>
+      ) : (
+      <>
       {/* Tabs */}
       <div className="flex border-b border-[#E8E6DF] mb-5 gap-1.5">
         <button
@@ -731,6 +818,8 @@ export default function AdminPanel({ onClose, triggerRefreshStats }: AdminPanelP
           )}
 
         </div>
+      )}
+      </>
       )}
     </div>
   );
