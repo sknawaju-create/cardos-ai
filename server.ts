@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import fs from "fs/promises";
+import crypto from "crypto";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import { createServer as createViteServer } from "vite";
@@ -12,6 +13,51 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json());
+
+// ==========================================
+// ADMIN AUTHENTICATION
+// ==========================================
+// The Admin Panel exposes waitlist PII and Google OAuth controls, so every
+// route it depends on must verify a shared secret before returning data.
+function isAdminAuthorized(req: express.Request): boolean {
+  const configuredPassword = process.env.ADMIN_PASSWORD;
+  if (!configuredPassword) return false;
+
+  const provided = req.get("x-admin-password") || "";
+  const providedBuf = Buffer.from(provided);
+  const configuredBuf = Buffer.from(configuredPassword);
+  if (providedBuf.length !== configuredBuf.length) return false;
+  return crypto.timingSafeEqual(providedBuf, configuredBuf);
+}
+
+function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (!process.env.ADMIN_PASSWORD) {
+    return res.status(503).json({ error: "Admin access is not configured on this server. Set ADMIN_PASSWORD in the environment to enable it." });
+  }
+  if (!isAdminAuthorized(req)) {
+    return res.status(401).json({ error: "Unauthorized. Invalid or missing admin password." });
+  }
+  next();
+}
+
+// Short-lived, single-use nonces binding a Google OAuth flow to an
+// admin-initiated request, so a stranger can't complete the redirect_uri
+// callback with their own Google account and overwrite our stored token.
+const pendingOAuthStates = new Map<string, number>();
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+
+function createOAuthState(): string {
+  const state = crypto.randomBytes(24).toString("hex");
+  pendingOAuthStates.set(state, Date.now() + OAUTH_STATE_TTL_MS);
+  return state;
+}
+
+function consumeOAuthState(state: string | undefined): boolean {
+  if (!state) return false;
+  const expiry = pendingOAuthStates.get(state);
+  pendingOAuthStates.delete(state);
+  return typeof expiry === "number" && Date.now() < expiry;
+}
 
 // Setup storage path for waitlist persistence
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -81,22 +127,31 @@ app.post("/api/waitlist", async (req, res) => {
 });
 
 // API: GET WAITLIST STATS
+// Public: only aggregate counts (used for the homepage social-proof widget).
+// The actual email addresses (recentSignups) are PII and only returned to
+// an authenticated admin.
 app.get("/api/waitlist/stats", async (req, res) => {
   try {
     await ensureDataDirectory();
     const fileContent = await fs.readFile(WAITLIST_FILE, "utf-8");
     const list = JSON.parse(fileContent);
-    
+
     // Default base offset as presented on original mockup (147)
     const baseSignupsCount = 147;
     return res.json({
       count: baseSignupsCount + list.length,
       realUsersJoined: list.length,
-      recentSignups: list.slice(-5).reverse()
+      recentSignups: isAdminAuthorized(req) ? list.slice(-5).reverse() : []
     });
   } catch (err) {
     return res.json({ count: 147, realUsersJoined: 0, recentSignups: [] });
   }
+});
+
+// GET /api/admin/verify - used by the Admin Panel login form to validate a
+// password before rendering any sensitive data.
+app.get("/api/admin/verify", requireAdmin, (req, res) => {
+  res.json({ ok: true });
 });
 
 // API: LIVE EXECUTE CARD WITH GEMINI
@@ -249,7 +304,7 @@ function getRedirectUri(req: express.Request) {
 }
 
 // GET /api/auth/url
-app.get("/api/auth/url", async (req, res) => {
+app.get("/api/auth/url", requireAdmin, async (req, res) => {
   try {
     const { clientId } = await getOAuthClientKeys();
     if (!clientId) {
@@ -268,7 +323,8 @@ app.get("/api/auth/url", async (req, res) => {
         "https://www.googleapis.com/auth/forms.responses.readonly"
       ].join(" "),
       access_type: "offline",
-      prompt: "consent"
+      prompt: "consent",
+      state: createOAuthState()
     });
 
     res.json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${params}` });
@@ -280,9 +336,12 @@ app.get("/api/auth/url", async (req, res) => {
 // GET /auth/callback and GET /auth/callback/
 app.get(["/auth/callback", "/auth/callback/"], async (req, res) => {
   try {
-    const { code } = req.query;
+    const { code, state } = req.query;
     if (!code) {
       return res.send("Missing code parameter in OAuth redirect callback.");
+    }
+    if (!consumeOAuthState(state as string | undefined)) {
+      return res.status(400).send("Invalid or expired authorization session. Please restart the Google connection from the Admin Panel.");
     }
 
     const { clientId, clientSecret } = await getOAuthClientKeys();
@@ -400,7 +459,7 @@ app.get("/api/google-forms/status", async (req, res) => {
 });
 
 // POST /api/google-forms/configure-keys
-app.post("/api/google-forms/configure-keys", async (req, res) => {
+app.post("/api/google-forms/configure-keys", requireAdmin, async (req, res) => {
   try {
     const { clientId, clientSecret } = req.body;
     if (!clientId || !clientSecret) {
@@ -424,7 +483,7 @@ app.post("/api/google-forms/configure-keys", async (req, res) => {
 });
 
 // POST /api/google-forms/disconnect
-app.post("/api/google-forms/disconnect", async (req, res) => {
+app.post("/api/google-forms/disconnect", requireAdmin, async (req, res) => {
   try {
     await fs.unlink(GOOGLE_CREDENTIALS_FILE).catch(() => {});
     await fs.unlink(GOOGLE_FORM_CONFIG_FILE).catch(() => {});
@@ -435,7 +494,7 @@ app.post("/api/google-forms/disconnect", async (req, res) => {
 });
 
 // POST /api/google-forms/toggle-embed
-app.post("/api/google-forms/toggle-embed", async (req, res) => {
+app.post("/api/google-forms/toggle-embed", requireAdmin, async (req, res) => {
   try {
     const { embedEnabled } = req.body;
     
@@ -455,7 +514,7 @@ app.post("/api/google-forms/toggle-embed", async (req, res) => {
 });
 
 // POST /api/google-forms/link
-app.post("/api/google-forms/link", async (req, res) => {
+app.post("/api/google-forms/link", requireAdmin, async (req, res) => {
   try {
     const { formId, formUrl } = req.body;
     if (!formId || !formUrl) {
@@ -479,7 +538,7 @@ app.post("/api/google-forms/link", async (req, res) => {
 });
 
 // POST /api/google-forms/create-form
-app.post("/api/google-forms/create-form", async (req, res) => {
+app.post("/api/google-forms/create-form", requireAdmin, async (req, res) => {
   try {
     const accessToken = await getGoogleAccessToken();
 
@@ -597,7 +656,7 @@ app.post("/api/google-forms/create-form", async (req, res) => {
 });
 
 // GET /api/google-forms/responses
-app.get("/api/google-forms/responses", async (req, res) => {
+app.get("/api/google-forms/responses", requireAdmin, async (req, res) => {
   try {
     const accessToken = await getGoogleAccessToken();
 
